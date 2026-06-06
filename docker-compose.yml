@@ -1,0 +1,74 @@
+version: '3.9'
+
+services:
+  # ── PostgreSQL Database ──────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: eduquest-postgres
+    environment:
+      POSTGRES_DB: eduquest_db
+      POSTGRES_USER: eduquest_user
+      POSTGRES_PASSWORD: eduquest_secure_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./src/main/resources/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eduquest_user -d eduquest_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis Cache ──────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: eduquest-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+
+  # ── Spring Boot Backend ──────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: eduquest-backend
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/eduquest_db
+      SPRING_DATASOURCE_USERNAME: eduquest_user
+      SPRING_DATASOURCE_PASSWORD: eduquest_secure_pass
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      APP_JWT_SECRET: ${JWT_SECRET:-EduQuestSIHProjectSecretKey2024SuperSecureBase64Key==}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      JAVA_OPTS: "-Xms256m -Xmx512m"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── React Frontend (Nginx) ───────────────────────────
+  frontend:
+    image: nginx:alpine
+    container_name: eduquest-frontend
+    ports:
+      - "3000:80"
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
